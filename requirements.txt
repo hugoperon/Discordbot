@@ -2,4 +2,4 @@ discord.py
 pymongo
 dnspython
 python-dotenv
-certifi>=2023.7.22 
+certifi>=2023.7.22
