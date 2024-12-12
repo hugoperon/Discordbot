@@ -19,7 +19,10 @@ MONGODB_URI = os.getenv('MONGODB_URI')
 if not MONGODB_URI:
     raise ValueError("La variable d'environnement MONGODB_URI n'est pas définie")
 
-print("URI MongoDB:", MONGODB_URI if MONGODB_URI else "Non défini")
+# Nettoyage de l'URI si nécessaire
+MONGODB_URI = MONGODB_URI.replace('MONGODB_URI=', '')
+
+print("URI MongoDB:", MONGODB_URI)
 
 # Configuration MongoDB avec gestion d'erreur plus robuste
 try:
