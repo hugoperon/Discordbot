@@ -6,7 +6,6 @@ from collections import defaultdict
 from dotenv import load_dotenv
 import os
 import logging
-import ssl
 
 load_dotenv()
 
@@ -14,12 +13,12 @@ load_dotenv()
 MONGODB_URI = os.getenv('MONGODB_URI')
 client = pymongo.MongoClient(
     MONGODB_URI,
-    ssl=True,
-    ssl_cert_reqs=ssl.CERT_NONE,
+    tls=True,
+    tlsAllowInvalidCertificates=True,
     connectTimeoutMS=30000,
     socketTimeoutMS=None,
     connect=False,
-    maxPoolsize=1
+    maxPoolSize=1
 )
 db = client["voice_tracker"]
 voice_times = db["voice_times"]
