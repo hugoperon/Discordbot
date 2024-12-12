@@ -64,7 +64,7 @@ def check_mongodb():
 # Création du bot Discord
 bot = commands.Bot(command_prefix='!', intents=discord.Intents.all())
 
-# Dictionnaire pour stocker les sessions actives
+# Dictionnaire pour stocker les sessions actives 
 voice_states = {}
 
 @bot.event
