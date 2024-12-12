@@ -19,6 +19,8 @@ MONGODB_URI = os.getenv('MONGODB_URI')
 if not MONGODB_URI:
     raise ValueError("La variable d'environnement MONGODB_URI n'est pas définie")
 
+print("URI MongoDB:", MONGODB_URI if MONGODB_URI else "Non défini")
+
 # Configuration MongoDB avec gestion d'erreur plus robuste
 try:
     if not MONGODB_URI.startswith(('mongodb://', 'mongodb+srv://')):
@@ -43,7 +45,7 @@ except Exception as e:
 
 # Initialisation des collections MongoDB seulement si la connexion est établie
 if client:
-    db = client["voice_tracker"]
+    db = client["HugoBot"]
     voice_times = db["voice_times"]
     voice_sessions = db["voice_sessions"]
 else:
@@ -302,41 +304,52 @@ async def top(ctx, limit: int = 5):
 
 @bot.command()
 async def mes_salons(ctx):
-    # Récupérer toutes les sessions de l'utilisateur groupées par salon
-    salons_stats = voice_sessions.aggregate([
-        {
-            '$match': {'user_id': ctx.author.id}
-        },
-        {
-            '$group': {
-                '_id': {
-                    'channel_id': '$channel_id',
-                    'channel_name': '$channel_name'
-                },
-                'total_time': {'$sum': '$duration'},
-                'sessions_count': {'$sum': 1}
+    try:
+        check_mongodb()  # Vérifie si MongoDB est disponible
+        
+        # Récupérer toutes les sessions de l'utilisateur groupées par salon
+        salons_stats = voice_sessions.aggregate([
+            {
+                '$match': {'user_id': ctx.author.id}
+            },
+            {
+                '$group': {
+                    '_id': {
+                        'channel_id': '$channel_id',
+                        'channel_name': '$channel_name'
+                    },
+                    'total_time': {'$sum': '$duration'},
+                    'sessions_count': {'$sum': 1}
+                }
+            },
+            {
+                '$sort': {'total_time': -1}
             }
-        },
-        {
-            '$sort': {'total_time': -1}
-        }
-    ])
-    
-    embed = discord.Embed(
-        title=f"Temps passé par salon pour {ctx.author.name}",
-        color=discord.Color.blue()
-    )
-    
-    for salon in salons_stats:
-        heures = round(salon['total_time'] / 3600, 1)
-        sessions = salon['sessions_count']
-        embed.add_field(
-            name=salon['_id']['channel_name'],
-            value=f"⏰ {heures}h\n🔄 {sessions} sessions",
-            inline=False
+        ])
+        
+        embed = discord.Embed(
+            title=f"Temps passé par salon pour {ctx.author.name}",
+            color=discord.Color.blue()
         )
-    
-    await ctx.send(embed=embed)
+        
+        salon_count = 0
+        for salon in salons_stats:
+            salon_count += 1
+            heures = round(salon['total_time'] / 3600, 1)
+            sessions = salon['sessions_count']
+            embed.add_field(
+                name=salon['_id']['channel_name'],
+                value=f"⏰ {heures}h\n🔄 {sessions} sessions",
+                inline=False
+            )
+        
+        if salon_count == 0:
+            await ctx.send("Vous n'avez pas encore passé de temps dans les salons vocaux!")
+        else:
+            await ctx.send(embed=embed)
+            
+    except commands.CommandError as e:
+        await ctx.send(str(e))
 
 @bot.command()
 async def user_temps(ctx, user: discord.Member):
