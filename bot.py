@@ -20,7 +20,7 @@ if not MONGODB_URI:
     raise ValueError("La variable d'environnement MONGODB_URI n'est pas définie")
 
 # Nettoyage de l'URI si nécessaire
-MONGODB_URI = MONGODB_URI.replace('MONGODB_URI=', '')
+MONGODB_URI = MONGODB_URI.replace('MONGODB_URI=', '').replace('directConnection=true', '')
 
 print("URI MongoDB:", MONGODB_URI)
 
@@ -35,8 +35,7 @@ try:
         tls=True,
         tlsAllowInvalidCertificates=True,
         retryWrites=True,
-        w='majority',
-        directConnection=True
+        w='majority'
     )
     # Test de connexion avec timeout
     client.admin.command('ping')
