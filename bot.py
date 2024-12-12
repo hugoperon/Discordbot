@@ -6,6 +6,7 @@ from collections import defaultdict
 from dotenv import load_dotenv
 import os
 import logging
+import certifi
 
 load_dotenv()
 
@@ -13,8 +14,7 @@ load_dotenv()
 MONGODB_URI = os.getenv('MONGODB_URI')
 client = pymongo.MongoClient(
     MONGODB_URI,
-    tls=True,
-    tlsAllowInvalidCertificates=True,
+    tlsCAFile=certifi.where(),
     connectTimeoutMS=30000,
     socketTimeoutMS=None,
     connect=False,
