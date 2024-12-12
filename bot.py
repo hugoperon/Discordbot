@@ -6,8 +6,7 @@ import pymongo
 from datetime import datetime, timedelta
 from collections import defaultdict
 import logging
-import certifi
-import urllib.parse
+
 
 # Chargement des variables d'environnement en premier
 load_dotenv()
@@ -20,22 +19,19 @@ MONGODB_URI = os.getenv('MONGODB_URI')
 if not MONGODB_URI:
     raise ValueError("La variable d'environnement MONGODB_URI n'est pas définie")
 
-# Encoder les caractères spéciaux dans l'URI
-username = urllib.parse.quote_plus("ThePoule")
-password = urllib.parse.quote_plus("Hugo2004!")
-MONGODB_URI = f"mongodb+srv://{username}:{password}@hugobot.msfpl.mongodb.net/voice_tracker?retryWrites=true&w=majority"
-
 # Configuration MongoDB avec gestion d'erreur plus robuste
 try:
     client = pymongo.MongoClient(
         MONGODB_URI,
         serverSelectionTimeoutMS=5000,
-        tlsCAFile=certifi.where(),
-        connectTimeoutMS=30000,
-        socketTimeoutMS=None
+        tls=True,
+        tlsAllowInvalidCertificates=True,
+        retryWrites=True,
+        w='majority',
+        directConnection=True
     )
     # Test de connexion avec timeout
-    client.server_info()
+    client.admin.command('ping')
     print("Connexion à MongoDB réussie!")
 except Exception as e:
     print(f"Erreur de connexion MongoDB: {e}")
