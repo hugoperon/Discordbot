@@ -1,44 +1,63 @@
+import os
+from dotenv import load_dotenv
 import discord
 from discord.ext import commands
 import pymongo
 from datetime import datetime, timedelta
 from collections import defaultdict
-from dotenv import load_dotenv
-import os
 import logging
 import certifi
+import urllib.parse
 
+# Chargement des variables d'environnement en premier
 load_dotenv()
 
-# Configuration MongoDB
-MONGODB_URI = os.getenv('MONGODB_URI')
-client = pymongo.MongoClient(
-    MONGODB_URI,
-    tlsCAFile=certifi.where(),
-    connectTimeoutMS=30000,
-    socketTimeoutMS=None,
-    connect=False,
-    maxPoolSize=1
-)
-db = client["voice_tracker"]
-voice_times = db["voice_times"]
-voice_sessions = db["voice_sessions"]  # Nouvelle collection pour les sessions
+# Configuration du logging
+logging.basicConfig(level=logging.INFO)
 
+# Récupération et encodage des informations de connexion MongoDB
+MONGODB_URI = os.getenv('MONGODB_URI')
+if not MONGODB_URI:
+    raise ValueError("La variable d'environnement MONGODB_URI n'est pas définie")
+
+# Encoder les caractères spéciaux dans l'URI
+username = urllib.parse.quote_plus("ThePoule")
+password = urllib.parse.quote_plus("Hugo2004!")
+MONGODB_URI = f"mongodb+srv://{username}:{password}@hugobot.msfpl.mongodb.net/voice_tracker?retryWrites=true&w=majority"
+
+# Configuration MongoDB avec gestion d'erreur plus robuste
 try:
-    # Test de connexion
-    client.admin.command('ping')
+    client = pymongo.MongoClient(
+        MONGODB_URI,
+        serverSelectionTimeoutMS=5000,
+        tlsCAFile=certifi.where(),
+        connectTimeoutMS=30000,
+        socketTimeoutMS=None
+    )
+    # Test de connexion avec timeout
+    client.server_info()
     print("Connexion à MongoDB réussie!")
 except Exception as e:
     print(f"Erreur de connexion MongoDB: {e}")
     logging.error(f"Erreur MongoDB: {str(e)}", exc_info=True)
+    # On continue quand même, le bot pourra fonctionner partiellement
+    client = None
 
+# Initialisation des collections MongoDB seulement si la connexion est établie
+if client:
+    db = client["voice_tracker"]
+    voice_times = db["voice_times"]
+    voice_sessions = db["voice_sessions"]
+else:
+    print("Mode dégradé : fonctionnalités MongoDB désactivées")
+    voice_times = None
+    voice_sessions = None
+
+# Création du bot Discord
 bot = commands.Bot(command_prefix='!', intents=discord.Intents.all())
 
 # Dictionnaire pour stocker les sessions actives
 voice_states = {}
-
-# Configuration du logging
-logging.basicConfig(level=logging.INFO)
 
 @bot.event
 async def on_voice_state_update(member, before, after):
