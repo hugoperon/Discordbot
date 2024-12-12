@@ -5,20 +5,41 @@ from datetime import datetime, timedelta
 from collections import defaultdict
 from dotenv import load_dotenv
 import os
+import logging
+import ssl
 
 load_dotenv()
 
 # Configuration MongoDB
 MONGODB_URI = os.getenv('MONGODB_URI')
-client = pymongo.MongoClient(MONGODB_URI)
+client = pymongo.MongoClient(
+    MONGODB_URI,
+    ssl=True,
+    ssl_cert_reqs=ssl.CERT_NONE,
+    connectTimeoutMS=30000,
+    socketTimeoutMS=None,
+    connect=False,
+    maxPoolsize=1
+)
 db = client["voice_tracker"]
 voice_times = db["voice_times"]
 voice_sessions = db["voice_sessions"]  # Nouvelle collection pour les sessions
+
+try:
+    # Test de connexion
+    client.admin.command('ping')
+    print("Connexion à MongoDB réussie!")
+except Exception as e:
+    print(f"Erreur de connexion MongoDB: {e}")
+    logging.error(f"Erreur MongoDB: {str(e)}", exc_info=True)
 
 bot = commands.Bot(command_prefix='!', intents=discord.Intents.all())
 
 # Dictionnaire pour stocker les sessions actives
 voice_states = {}
+
+# Configuration du logging
+logging.basicConfig(level=logging.INFO)
 
 @bot.event
 async def on_voice_state_update(member, before, after):
@@ -334,5 +355,21 @@ async def user_temps(ctx, user: discord.Member):
     else:
         await ctx.send(f"{user.name} n'a pas encore passé de temps en vocal!")
 
+@bot.event
+async def on_ready():
+    print(f'Bot connecté en tant que {bot.user.name}')
+    print(f'Bot ID: {bot.user.id}')
+    print('-------------------')
+
+@bot.event
+async def on_error(event, *args, **kwargs):
+    logging.error(f'Une erreur est survenue dans {event}', exc_info=True)
+
+@bot.event
+async def on_command_error(ctx, error):
+    logging.error(f'Erreur de commande: {str(error)}')
+    await ctx.send(f"Une erreur s'est produite: {str(error)}")
+
 if __name__ == "__main__":
+    print("Démarrage du bot...")
     bot.run(os.getenv('DISCORD_TOKEN')) 
