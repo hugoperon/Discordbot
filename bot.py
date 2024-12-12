@@ -21,6 +21,9 @@ if not MONGODB_URI:
 
 # Configuration MongoDB avec gestion d'erreur plus robuste
 try:
+    if not MONGODB_URI.startswith(('mongodb://', 'mongodb+srv://')):
+        raise ValueError("L'URI MongoDB doit commencer par 'mongodb://' ou 'mongodb+srv://'")
+        
     client = pymongo.MongoClient(
         MONGODB_URI,
         serverSelectionTimeoutMS=5000,
@@ -36,7 +39,6 @@ try:
 except Exception as e:
     print(f"Erreur de connexion MongoDB: {e}")
     logging.error(f"Erreur MongoDB: {str(e)}", exc_info=True)
-    # On continue quand même, le bot pourra fonctionner partiellement
     client = None
 
 # Initialisation des collections MongoDB seulement si la connexion est établie
@@ -48,6 +50,11 @@ else:
     print("Mode dégradé : fonctionnalités MongoDB désactivées")
     voice_times = None
     voice_sessions = None
+
+# Ajoutons une fonction pour vérifier si MongoDB est disponible
+def check_mongodb():
+    if not client or not voice_times or not voice_sessions:
+        raise commands.CommandError("La base de données n'est pas disponible pour le moment.")
 
 # Création du bot Discord
 bot = commands.Bot(command_prefix='!', intents=discord.Intents.all())
@@ -333,41 +340,44 @@ async def mes_salons(ctx):
 
 @bot.command()
 async def user_temps(ctx, user: discord.Member):
-    # Récupérer les stats de l'utilisateur mentionné
-    user_data = voice_times.find_one({"user_id": user.id})
-    
-    if user_data:
-        total_minutes = round(user_data["total_time"] / 60)
-        total_heures = round(total_minutes / 60, 1)
+    try:
+        check_mongodb()  # Vérifie si MongoDB est disponible
         
-        embed = discord.Embed(
-            title=f"Statistiques de {user.name}",
-            color=discord.Color.green()
-        )
-        embed.add_field(
-            name="Temps total",
-            value=f"⏰ {total_heures} heures ({total_minutes} minutes)",
-            inline=False
-        )
-        
-        # Ajouter le temps aujourd'hui
-        today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-        today_sessions = voice_sessions.find({
-            'user_id': user.id,
-            'start_time': {'$gte': today}
-        })
-        today_time = sum(session['duration'] for session in today_sessions)
-        today_minutes = round(today_time / 60)
-        
-        embed.add_field(
-            name="Aujourd'hui",
-            value=f"⌛ {today_minutes} minutes",
-            inline=False
-        )
-        
-        await ctx.send(embed=embed)
-    else:
-        await ctx.send(f"{user.name} n'a pas encore passé de temps en vocal!")
+        user_data = voice_times.find_one({"user_id": user.id})
+        if user_data:
+            total_minutes = round(user_data["total_time"] / 60)
+            total_heures = round(total_minutes / 60, 1)
+            
+            embed = discord.Embed(
+                title=f"Statistiques de {user.name}",
+                color=discord.Color.green()
+            )
+            embed.add_field(
+                name="Temps total",
+                value=f"⏰ {total_heures} heures ({total_minutes} minutes)",
+                inline=False
+            )
+            
+            # Ajouter le temps aujourd'hui
+            today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            today_sessions = voice_sessions.find({
+                'user_id': user.id,
+                'start_time': {'$gte': today}
+            })
+            today_time = sum(session['duration'] for session in today_sessions)
+            today_minutes = round(today_time / 60)
+            
+            embed.add_field(
+                name="Aujourd'hui",
+                value=f"⌛ {today_minutes} minutes",
+                inline=False
+            )
+            
+            await ctx.send(embed=embed)
+        else:
+            await ctx.send(f"{user.name} n'a pas encore passé de temps en vocal!")
+    except commands.CommandError as e:
+        await ctx.send(str(e))
 
 @bot.event
 async def on_ready():
