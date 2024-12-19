@@ -2,7 +2,7 @@ name: Rerun Bot
 
 on:
   schedule:
-    - cron: '0 */5 * * *'  # Toutes les 5 heures
+    - cron: '0 */5 * * *'
   workflow_dispatch:
 
 jobs:
@@ -17,4 +17,4 @@ jobs:
           -H "Authorization: token $GH_TOKEN" \
           -H "Accept: application/vnd.github.v3+json" \
           https://api.github.com/repos/${{ github.repository }}/actions/workflows/deploy.yml/dispatches \
-          -d '{"ref":"main"}' 
+          -d '{"ref":"main"}'

@@ -5,6 +5,23 @@ import pymongo
 from datetime import datetime, timedelta
 from collections import defaultdict
 
+# Au début du fichier, juste après les imports
+print("=== Vérification des variables d'environnement ===")
+token = os.getenv('DISCORD_TOKEN')
+uri = os.getenv('MONGODB_URI')
+
+if not token:
+    print("ERREUR: DISCORD_TOKEN n'est pas défini!")
+    exit(1)
+
+if not uri:
+    print("ERREUR: MONGODB_URI n'est pas défini!")
+    exit(1)
+
+print(f"DISCORD_TOKEN trouvé: {'✓' if token else '✗'}")
+print(f"MONGODB_URI trouvé: {'✓' if uri else '✗'}")
+print("============================================")
+
 # Configuration MongoDB avec plus de logging
 MONGODB_URI = os.getenv('MONGODB_URI')
 print(f"URI MongoDB (masquée): {MONGODB_URI[:20]}...{MONGODB_URI[-20:]}")  # Pour vérifier sans exposer les credentials
