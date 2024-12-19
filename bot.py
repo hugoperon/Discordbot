@@ -127,36 +127,53 @@ async def stats_semaine(ctx):
 @bot.command()
 async def stats_mois(ctx):
     month_ago = datetime.now() - timedelta(days=30)
-    cursor = db.execute('SELECT SUM(duration) FROM voice_sessions WHERE user_id = ? AND start_time >= ?', (ctx.author.id, month_ago))
-    total_time = next(cursor, {'SUM(duration)': 0})['SUM(duration)']
+    cursor = db.execute('''
+        SELECT SUM(duration) as total_time 
+        FROM voice_sessions 
+        WHERE user_id = ? AND start_time >= ?
+    ''', (ctx.author.id, month_ago))
+    row = cursor.fetchone()
+    total_time = row['total_time'] if row and row['total_time'] else 0
     hours = round(total_time / 3600, 1)
     
     await ctx.send(f"Ce mois-ci, vous avez passé {hours} heures en vocal!")
 
 @bot.command()
 async def moyenne(ctx):
-    cursor = db.execute('SELECT duration FROM voice_sessions WHERE user_id = ?', (ctx.author.id,))
-    total_time = 0
-    days = defaultdict(float)
+    cursor = db.execute('''
+        SELECT date(start_time) as day, SUM(duration) as daily_time
+        FROM voice_sessions 
+        WHERE user_id = ?
+        GROUP BY day
+    ''', (ctx.author.id,))
     
-    for row in cursor:
-        day = datetime.fromtimestamp(row[0]).date()
-        days[day] += row[0]
-        total_time += row[0]
-    
-    if len(days) > 0:
-        avg_time = total_time / len(days)
+    rows = cursor.fetchall()
+    if rows:
+        total_time = sum(row['daily_time'] for row in rows)
+        avg_time = total_time / len(rows)
         await ctx.send(f"En moyenne, vous passez {round(avg_time/60)} minutes par jour en vocal!")
     else:
         await ctx.send("Pas encore assez de données pour calculer une moyenne!")
 
 @bot.command()
 async def top_salon(ctx):
-    cursor = db.execute('SELECT channel_name, SUM(duration) FROM voice_sessions WHERE user_id = ? GROUP BY channel_name ORDER BY SUM(duration) DESC', (ctx.author.id,))
+    cursor = db.execute('''
+        SELECT channel_name, SUM(duration) as total_time, COUNT(*) as sessions
+        FROM voice_sessions 
+        WHERE user_id = ? 
+        GROUP BY channel_name 
+        ORDER BY total_time DESC
+    ''', (ctx.author.id,))
+    
     embed = discord.Embed(title="Temps par salon", color=discord.Color.green())
     for row in cursor:
-        hours = round(row[1] / 3600, 1)
-        embed.add_field(name=row[0], value=f"{hours}h", inline=False)
+        hours = round(row['total_time'] / 3600, 1)
+        sessions = row['sessions']
+        embed.add_field(
+            name=row['channel_name'],
+            value=f"⏰ {hours}h\n🔄 {sessions} sessions",
+            inline=False
+        )
     
     await ctx.send(embed=embed)
 
@@ -183,50 +200,51 @@ async def compare(ctx, user: discord.Member):
 
 @bot.command()
 async def duo(ctx, user: discord.Member):
-    # Trouver les sessions où les deux utilisateurs étaient dans le même salon
-    cursor = db.execute('SELECT * FROM voice_sessions WHERE user_id = ?', (ctx.author.id,))
-    user1_sessions = cursor.fetchall()
-    cursor = db.execute('SELECT * FROM voice_sessions WHERE user_id = ?', (user.id,))
-    user2_sessions = cursor.fetchall()
+    cursor = db.execute('''
+        SELECT s1.channel_id, s1.start_time, s1.end_time, s2.start_time, s2.end_time
+        FROM voice_sessions s1
+        JOIN voice_sessions s2 ON s1.channel_id = s2.channel_id
+        WHERE s1.user_id = ? AND s2.user_id = ?
+        AND s1.end_time > s2.start_time AND s2.end_time > s1.start_time
+    ''', (ctx.author.id, user.id))
     
     total_duo_time = 0
-    for session1 in user1_sessions:
-        for session2 in user2_sessions:
-            if (session1[3] == session2[3] and
-                session1[4] < session2[5] and
-                session2[4] < session1[5]):
-                # Calculer le temps de chevauchement
-                overlap_start = max(session1[5], session2[5])
-                overlap_end = min(session1[6], session2[6])
-                total_duo_time += (overlap_end - overlap_start).total_seconds()
+    for row in cursor:
+        overlap_start = max(row[1], row[3])
+        overlap_end = min(row[2], row[4])
+        total_duo_time += (overlap_end - overlap_start).total_seconds()
     
     hours = round(total_duo_time / 3600, 1)
     await ctx.send(f"Vous avez passé {hours}h en vocal ensemble!")
 
 # Fonction utilitaire pour vérifier les streaks
 def get_streak_days(user_id):
-    cursor = db.execute('SELECT start_time FROM voice_sessions WHERE user_id = ? ORDER BY start_time', (user_id,))
-    sessions = cursor.fetchall()
-    days = set()
-    current_streak = 0
-    best_streak = 0
-    last_day = None
+    cursor = db.execute('''
+        SELECT DISTINCT date(start_time) as day
+        FROM voice_sessions
+        WHERE user_id = ?
+        ORDER BY day
+    ''', (user_id,))
     
-    for session in sessions:
-        day = datetime.fromtimestamp(session[0]).date()
-        days.add(day)
+    days = [row['day'] for row in cursor.fetchall()]
+    if not days:
+        return 0, 0
         
-        if last_day is None:
-            current_streak = 1
-        elif (day - last_day).days == 1:
-            current_streak += 1
-        elif (day - last_day).days > 1:
-            best_streak = max(best_streak, current_streak)
-            current_streak = 1
-            
-        last_day = day
+    current_streak = 1
+    best_streak = 1
+    current_count = 1
     
-    best_streak = max(best_streak, current_streak)
+    for i in range(1, len(days)):
+        date1 = datetime.strptime(days[i-1], '%Y-%m-%d')
+        date2 = datetime.strptime(days[i], '%Y-%m-%d')
+        if (date2 - date1).days == 1:
+            current_count += 1
+            current_streak = max(current_streak, current_count)
+        else:
+            best_streak = max(best_streak, current_count)
+            current_count = 1
+    
+    best_streak = max(best_streak, current_count)
     return current_streak, best_streak
 
 @bot.command()
