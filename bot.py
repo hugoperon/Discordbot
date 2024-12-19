@@ -87,8 +87,14 @@ async def on_voice_state_update(member, before, after):
 @bot.command()
 async def stats_jour(ctx):
     today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-    cursor = db.execute('SELECT total_time FROM voice_times WHERE user_id = ? AND start_time >= ?', (ctx.author.id, today))
-    total_time = sum(row[0] for row in cursor)
+    cursor = db.execute('''
+        SELECT SUM(duration) as total_time 
+        FROM voice_sessions 
+        WHERE user_id = ? AND start_time >= ?
+    ''', (ctx.author.id, today))
+    
+    row = cursor.fetchone()
+    total_time = row['total_time'] if row and row['total_time'] else 0
     minutes = round(total_time / 60)
     
     await ctx.send(f"Aujourd'hui, vous avez passé {minutes} minutes en vocal!")
@@ -96,15 +102,25 @@ async def stats_jour(ctx):
 @bot.command()
 async def stats_semaine(ctx):
     week_ago = datetime.now() - timedelta(days=7)
-    cursor = db.execute('SELECT total_time FROM voice_sessions WHERE user_id = ? AND start_time >= ?', (ctx.author.id, week_ago))
+    cursor = db.execute('''
+        SELECT strftime('%w', start_time) as day, SUM(duration) as total_time
+        FROM voice_sessions 
+        WHERE user_id = ? AND start_time >= ?
+        GROUP BY day
+        ORDER BY day
+    ''', (ctx.author.id, week_ago))
+    
     daily_times = defaultdict(int)
+    days = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche']
+    
     for row in cursor:
-        day = datetime.fromtimestamp(row[0]).strftime('%A')  # Jour de la semaine
-        daily_times[day] += row[0]
+        day_num = int(row['day'])
+        daily_times[days[day_num]] = row['total_time']
     
     embed = discord.Embed(title="Statistiques hebdomadaires", color=discord.Color.blue())
-    for day, time in daily_times.items():
-        embed.add_field(name=day, value=f"{round(time/60)} minutes", inline=False)
+    for day in days:
+        minutes = round(daily_times[day] / 60)
+        embed.add_field(name=day, value=f"{minutes} minutes", inline=False)
     
     await ctx.send(embed=embed)
 
