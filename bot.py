@@ -65,22 +65,23 @@ async def on_voice_state_update(member, before, after):
             duration = (now - start_data['start_time']).total_seconds()
             
             # Enregistrer la session
-            session = {
-                'user_id': member.id,
-                'username': member.name,
-                'channel_id': start_data['channel_id'],
-                'channel_name': start_data['channel_name'],
-                'start_time': start_data['start_time'],
-                'end_time': now,
-                'duration': duration
-            }
-            db.execute('INSERT INTO voice_sessions (user_id, username, channel_id, channel_name, start_time, end_time, duration) VALUES (?, ?, ?, ?, ?, ?, ?)', (session['user_id'], session['username'], session['channel_id'], session['channel_name'], session['start_time'], session['end_time'], session['duration']))
-            db.commit()
+            db.execute('''
+                INSERT INTO voice_sessions 
+                (user_id, username, channel_id, channel_name, start_time, end_time, duration) 
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (member.id, member.name, start_data['channel_id'], 
+                 start_data['channel_name'], start_data['start_time'], now, duration))
             
-            # Mettre à jour les stats globales
-            db.execute('UPDATE voice_times SET total_time = total_time + ? WHERE user_id = ?', (duration, member.id))
-            db.commit()
+            # Mettre à jour ou créer l'entrée dans voice_times
+            db.execute('''
+                INSERT INTO voice_times (user_id, username, total_time)
+                VALUES (?, ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET 
+                total_time = total_time + ?,
+                username = ?
+            ''', (member.id, member.name, duration, duration, member.name))
             
+            db.commit()
             del voice_states[member.id]
 
 @bot.command()
@@ -225,9 +226,13 @@ async def best_streak(ctx):
 @bot.command()
 async def temps(ctx):
     cursor = db.execute('SELECT total_time FROM voice_times WHERE user_id = ?', (ctx.author.id,))
-    user_data = next(cursor, {'total_time': 0})
-    total_minutes = round(user_data['total_time'] / 60)
-    await ctx.send(f"Vous avez passé {total_minutes} minutes en vocal!")
+    row = cursor.fetchone()
+    
+    if row:
+        total_minutes = round(row['total_time'] / 60)
+        await ctx.send(f"Vous avez passé {total_minutes} minutes en vocal!")
+    else:
+        await ctx.send("Vous n'avez pas encore passé de temps en vocal!")
 
 @bot.command()
 async def top(ctx, limit: int = 5):
