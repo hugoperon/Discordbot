@@ -1,0 +1,20 @@
+name: Rerun Bot
+
+on:
+  schedule:
+    - cron: '0 */5 * * *'  # Toutes les 5 heures
+  workflow_dispatch:
+
+jobs:
+  rerun:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Rerun Discord Bot Workflow
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          curl -X POST \
+          -H "Authorization: token $GH_TOKEN" \
+          -H "Accept: application/vnd.github.v3+json" \
+          https://api.github.com/repos/${{ github.repository }}/actions/workflows/deploy.yml/dispatches \
+          -d '{"ref":"main"}' 
