@@ -26,25 +26,28 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    # Restaurer la base de données précédente si elle existe
+    # Restaurer la base de données précédente
     - name: Restore database
-      uses: actions/cache@v2
+      id: cache-db
+      uses: actions/cache/restore@v3
       with:
         path: voice_stats.db
-        key: ${{ runner.os }}-db-${{ github.sha }}
+        key: database-${{ github.run_id }}
         restore-keys: |
-          ${{ runner.os }}-db-
+          database-
 
     - name: Run bot
       env:
         DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
       run: |
         python bot.py
+      # Même si le bot est arrêté/annulé, continue aux étapes suivantes
+      continue-on-error: true
 
-    # Sauvegarder la base de données pour la prochaine exécution
+    # Sauvegarder la base de données dans tous les cas
     - name: Save database
-      uses: actions/cache@v2
-      if: always()
+      if: always()  # Exécute cette étape même si les précédentes échouent
+      uses: actions/cache/save@v3
       with:
         path: voice_stats.db
-        key: ${{ runner.os }}-db-${{ github.sha }}
+        key: database-${{ github.run_id }}
