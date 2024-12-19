@@ -7,6 +7,8 @@ from collections import defaultdict
 
 # Configuration MongoDB avec plus de logging
 MONGODB_URI = os.getenv('MONGODB_URI')
+print(f"URI MongoDB (masquée): {MONGODB_URI[:20]}...{MONGODB_URI[-20:]}")  # Pour vérifier sans exposer les credentials
+
 try:
     print("Tentative de connexion à MongoDB...")
     client = pymongo.MongoClient(
@@ -18,20 +20,33 @@ try:
         w='majority',
         connectTimeoutMS=30000,
         socketTimeoutMS=None,
-        maxPoolSize=50
+        maxPoolSize=50,
+        authSource='admin'  # Ajout explicite de authSource
     )
-    # Test de connexion
-    client.admin.command('ping')
-    print("Connexion à MongoDB réussie!")
     
-    # Initialisation des collections
+    # Test de connexion plus détaillé
+    print("Test de la connexion...")
+    server_info = client.server_info()
+    print(f"Version MongoDB: {server_info.get('version')}")
+    
+    # Initialisation des collections avec vérification
+    print("Initialisation des collections...")
     db = client["HugoBot"]
     voice_times = db["voice_times"]
     voice_sessions = db["voice_sessions"]
-    print("Collections MongoDB initialisées avec succès")
+    
+    # Test d'écriture/lecture
+    test_doc = {'test': True, 'timestamp': datetime.now()}
+    voice_times.insert_one(test_doc)
+    voice_times.delete_one({'test': True})
+    print("Test d'écriture/lecture réussi!")
+    
 except Exception as e:
-    print(f"Erreur détaillée de connexion MongoDB: {str(e)}")
-    print(f"Type d'erreur: {type(e)}")
+    print(f"Erreur détaillée de connexion MongoDB:")
+    print(f"Type d'erreur: {type(e).__name__}")
+    print(f"Message d'erreur: {str(e)}")
+    if hasattr(e, 'details'):
+        print(f"Détails: {e.details}")
     client = None
     voice_times = None
     voice_sessions = None
