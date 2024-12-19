@@ -1,82 +1,27 @@
 import os
 import discord
 from discord.ext import commands
-import pymongo
+import sqlite3
 from datetime import datetime, timedelta
 from collections import defaultdict
 
-# Au début du fichier, juste après les imports
-print("=== Vérification des variables d'environnement ===")
-token = os.getenv('DISCORD_TOKEN')
-uri = os.getenv('MONGODB_URI')
-
-if not token:
-    print("ERREUR: DISCORD_TOKEN n'est pas défini!")
-    exit(1)
-
-if not uri:
-    print("ERREUR: MONGODB_URI n'est pas défini!")
-    exit(1)
-
-print(f"DISCORD_TOKEN trouvé: {'✓' if token else '✗'}")
-print(f"MONGODB_URI trouvé: {'✓' if uri else '✗'}")
-print("============================================")
-
-# Configuration MongoDB avec plus de logging
-MONGODB_URI = os.getenv('MONGODB_URI')
-print(f"URI MongoDB (masquée): {MONGODB_URI[:20]}...{MONGODB_URI[-20:]}")  # Pour vérifier sans exposer les credentials
-
-try:
-    print("Tentative de connexion à MongoDB...")
-    client = pymongo.MongoClient(
-        MONGODB_URI,
-        serverSelectionTimeoutMS=30000,
-        tls=True,
-        tlsAllowInvalidCertificates=True,
-        retryWrites=True,
-        w='majority',
-        connectTimeoutMS=30000,
-        socketTimeoutMS=None,
-        maxPoolSize=50,
-        authSource='admin'  # Ajout explicite de authSource
-    )
+# Configuration SQLite
+def init_db():
+    # Utiliser un chemin absolu pour la base de données
+    db_path = os.path.join(os.getcwd(), 'voice_stats.db')
+    print(f"Base de données SQLite: {db_path}")
     
-    # Test de connexion plus détaillé
-    print("Test de la connexion...")
-    server_info = client.server_info()
-    print(f"Version MongoDB: {server_info.get('version')}")
-    
-    # Initialisation des collections avec vérification
-    print("Initialisation des collections...")
-    db = client["HugoBot"]
-    voice_times = db["voice_times"]
-    voice_sessions = db["voice_sessions"]
-    
-    # Test d'écriture/lecture
-    test_doc = {'test': True, 'timestamp': datetime.now()}
-    voice_times.insert_one(test_doc)
-    voice_times.delete_one({'test': True})
-    print("Test d'écriture/lecture réussi!")
-    
-except Exception as e:
-    print(f"Erreur détaillée de connexion MongoDB:")
-    print(f"Type d'erreur: {type(e).__name__}")
-    print(f"Message d'erreur: {str(e)}")
-    if hasattr(e, 'details'):
-        print(f"Détails: {e.details}")
-    client = None
-    voice_times = None
-    voice_sessions = None
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row  # Pour avoir accès aux colonnes par nom
+    return conn
+
+# Initialisation de la base de données
+db = init_db()
 
 bot = commands.Bot(command_prefix='!', intents=discord.Intents.all())
 
 # Dictionnaire pour stocker les sessions actives
 voice_states = {}
-
-# Ajoutez cette fonction de vérification
-def check_db():
-    if voice_times is None or voice_sessions is None:
-        raise Exception("La base de données n'est pas disponible")
 
 @bot.event
 async def on_voice_state_update(member, before, after):
@@ -106,29 +51,20 @@ async def on_voice_state_update(member, before, after):
                 'end_time': now,
                 'duration': duration
             }
-            voice_sessions.insert_one(session)
+            db.execute('INSERT INTO voice_sessions (user_id, username, channel_id, channel_name, start_time, end_time, duration) VALUES (?, ?, ?, ?, ?, ?, ?)', (session['user_id'], session['username'], session['channel_id'], session['channel_name'], session['start_time'], session['end_time'], session['duration']))
+            db.commit()
             
             # Mettre à jour les stats globales
-            voice_times.update_one(
-                {"user_id": member.id},
-                {
-                    "$inc": {"total_time": duration},
-                    "$set": {"username": member.name}
-                },
-                upsert=True
-            )
+            db.execute('UPDATE voice_times SET total_time = total_time + ? WHERE user_id = ?', (duration, member.id))
+            db.commit()
             
             del voice_states[member.id]
 
 @bot.command()
 async def stats_jour(ctx):
     today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-    sessions = voice_sessions.find({
-        'user_id': ctx.author.id,
-        'start_time': {'$gte': today}
-    })
-    
-    total_time = sum(session['duration'] for session in sessions)
+    cursor = db.execute('SELECT total_time FROM voice_times WHERE user_id = ? AND start_time >= ?', (ctx.author.id, today))
+    total_time = sum(row[0] for row in cursor)
     minutes = round(total_time / 60)
     
     await ctx.send(f"Aujourd'hui, vous avez passé {minutes} minutes en vocal!")
@@ -136,15 +72,11 @@ async def stats_jour(ctx):
 @bot.command()
 async def stats_semaine(ctx):
     week_ago = datetime.now() - timedelta(days=7)
-    sessions = voice_sessions.find({
-        'user_id': ctx.author.id,
-        'start_time': {'$gte': week_ago}
-    })
-    
+    cursor = db.execute('SELECT total_time FROM voice_sessions WHERE user_id = ? AND start_time >= ?', (ctx.author.id, week_ago))
     daily_times = defaultdict(int)
-    for session in sessions:
-        day = session['start_time'].strftime('%A')  # Jour de la semaine
-        daily_times[day] += session['duration']
+    for row in cursor:
+        day = datetime.fromtimestamp(row[0]).strftime('%A')  # Jour de la semaine
+        daily_times[day] += row[0]
     
     embed = discord.Embed(title="Statistiques hebdomadaires", color=discord.Color.blue())
     for day, time in daily_times.items():
@@ -155,36 +87,22 @@ async def stats_semaine(ctx):
 @bot.command()
 async def stats_mois(ctx):
     month_ago = datetime.now() - timedelta(days=30)
-    total_time = voice_sessions.aggregate([
-        {
-            '$match': {
-                'user_id': ctx.author.id,
-                'start_time': {'$gte': month_ago}
-            }
-        },
-        {
-            '$group': {
-                '_id': None,
-                'total': {'$sum': '$duration'}
-            }
-        }
-    ])
-    
-    result = next(total_time, {'total': 0})
-    hours = round(result['total'] / 3600, 1)
+    cursor = db.execute('SELECT SUM(duration) FROM voice_sessions WHERE user_id = ? AND start_time >= ?', (ctx.author.id, month_ago))
+    total_time = next(cursor, {'SUM(duration)': 0})['SUM(duration)']
+    hours = round(total_time / 3600, 1)
     
     await ctx.send(f"Ce mois-ci, vous avez passé {hours} heures en vocal!")
 
 @bot.command()
 async def moyenne(ctx):
-    sessions = voice_sessions.find({'user_id': ctx.author.id})
+    cursor = db.execute('SELECT duration FROM voice_sessions WHERE user_id = ?', (ctx.author.id,))
     total_time = 0
     days = defaultdict(float)
     
-    for session in sessions:
-        day = session['start_time'].date()
-        days[day] += session['duration']
-        total_time += session['duration']
+    for row in cursor:
+        day = datetime.fromtimestamp(row[0]).date()
+        days[day] += row[0]
+        total_time += row[0]
     
     if len(days) > 0:
         avg_time = total_time / len(days)
@@ -194,42 +112,30 @@ async def moyenne(ctx):
 
 @bot.command()
 async def top_salon(ctx):
-    sessions = voice_sessions.aggregate([
-        {
-            '$match': {'user_id': ctx.author.id}
-        },
-        {
-            '$group': {
-                '_id': '$channel_name',
-                'total_time': {'$sum': '$duration'}
-            }
-        },
-        {
-            '$sort': {'total_time': -1}
-        }
-    ])
-    
+    cursor = db.execute('SELECT channel_name, SUM(duration) FROM voice_sessions WHERE user_id = ? GROUP BY channel_name ORDER BY SUM(duration) DESC', (ctx.author.id,))
     embed = discord.Embed(title="Temps par salon", color=discord.Color.green())
-    for salon in sessions:
-        hours = round(salon['total_time'] / 3600, 1)
-        embed.add_field(name=salon['_id'], value=f"{hours}h", inline=False)
+    for row in cursor:
+        hours = round(row[1] / 3600, 1)
+        embed.add_field(name=row[0], value=f"{hours}h", inline=False)
     
     await ctx.send(embed=embed)
 
 @bot.command()
 async def compare(ctx, user: discord.Member):
-    user1_time = voice_times.find_one({'user_id': ctx.author.id})
-    user2_time = voice_times.find_one({'user_id': user.id})
+    cursor = db.execute('SELECT total_time FROM voice_times WHERE user_id = ?', (ctx.author.id,))
+    user1_time = next(cursor, {'total_time': 0})['total_time']
+    cursor = db.execute('SELECT total_time FROM voice_times WHERE user_id = ?', (user.id,))
+    user2_time = next(cursor, {'total_time': 0})['total_time']
     
     embed = discord.Embed(title="Comparaison", color=discord.Color.gold())
     embed.add_field(
         name=ctx.author.name,
-        value=f"{round(user1_time.get('total_time', 0)/3600, 1)}h",
+        value=f"{round(user1_time/3600, 1)}h",
         inline=True
     )
     embed.add_field(
         name=user.name,
-        value=f"{round(user2_time.get('total_time', 0)/3600, 1)}h",
+        value=f"{round(user2_time/3600, 1)}h",
         inline=True
     )
     
@@ -238,18 +144,20 @@ async def compare(ctx, user: discord.Member):
 @bot.command()
 async def duo(ctx, user: discord.Member):
     # Trouver les sessions où les deux utilisateurs étaient dans le même salon
-    user1_sessions = list(voice_sessions.find({'user_id': ctx.author.id}))
-    user2_sessions = list(voice_sessions.find({'user_id': user.id}))
+    cursor = db.execute('SELECT * FROM voice_sessions WHERE user_id = ?', (ctx.author.id,))
+    user1_sessions = cursor.fetchall()
+    cursor = db.execute('SELECT * FROM voice_sessions WHERE user_id = ?', (user.id,))
+    user2_sessions = cursor.fetchall()
     
     total_duo_time = 0
     for session1 in user1_sessions:
         for session2 in user2_sessions:
-            if (session1['channel_id'] == session2['channel_id'] and
-                session1['start_time'] < session2['end_time'] and
-                session2['start_time'] < session1['end_time']):
+            if (session1[3] == session2[3] and
+                session1[4] < session2[5] and
+                session2[4] < session1[5]):
                 # Calculer le temps de chevauchement
-                overlap_start = max(session1['start_time'], session2['start_time'])
-                overlap_end = min(session1['end_time'], session2['end_time'])
+                overlap_start = max(session1[5], session2[5])
+                overlap_end = min(session1[6], session2[6])
                 total_duo_time += (overlap_end - overlap_start).total_seconds()
     
     hours = round(total_duo_time / 3600, 1)
@@ -257,14 +165,15 @@ async def duo(ctx, user: discord.Member):
 
 # Fonction utilitaire pour vérifier les streaks
 def get_streak_days(user_id):
-    sessions = voice_sessions.find({'user_id': user_id}).sort('start_time', 1)
+    cursor = db.execute('SELECT start_time FROM voice_sessions WHERE user_id = ? ORDER BY start_time', (user_id,))
+    sessions = cursor.fetchall()
     days = set()
     current_streak = 0
     best_streak = 0
     last_day = None
     
     for session in sessions:
-        day = session['start_time'].date()
+        day = datetime.fromtimestamp(session[0]).date()
         days.add(day)
         
         if last_day is None:
@@ -292,57 +201,32 @@ async def best_streak(ctx):
 
 @bot.command()
 async def temps(ctx):
-    try:
-        check_db()  # Vérifie l'état de la base de données
-        user_data = voice_times.find_one({"user_id": ctx.author.id})
-        if user_data:
-            total_minutes = round(user_data["total_time"] / 60)
-            await ctx.send(f"Vous avez passé {total_minutes} minutes en vocal!")
-        else:
-            await ctx.send("Vous n'avez pas encore passé de temps en vocal!")
-    except Exception as e:
-        await ctx.send(f"Erreur: {str(e)}")
+    cursor = db.execute('SELECT total_time FROM voice_times WHERE user_id = ?', (ctx.author.id,))
+    user_data = next(cursor, {'total_time': 0})
+    total_minutes = round(user_data['total_time'] / 60)
+    await ctx.send(f"Vous avez passé {total_minutes} minutes en vocal!")
 
 @bot.command()
 async def top(ctx, limit: int = 5):
-    try:
-        check_db()
-        top_users = voice_times.find().sort("total_time", -1).limit(limit)
-        
-        embed = discord.Embed(title=f"Top {limit} - Temps en vocal", color=discord.Color.blue())
-        for i, user in enumerate(top_users, 1):
-            minutes = round(user["total_time"] / 60)
-            embed.add_field(
-                name=f"#{i} {user['username']}", 
-                value=f"{minutes} minutes",
-                inline=False
-            )
-        
-        await ctx.send(embed=embed)
-    except Exception as e:
-        await ctx.send(f"Erreur: {str(e)}")
+    cursor = db.execute('SELECT username, total_time FROM voice_times ORDER BY total_time DESC LIMIT ?', (limit,))
+    top_users = cursor.fetchall()
+    
+    embed = discord.Embed(title=f"Top {limit} - Temps en vocal", color=discord.Color.blue())
+    for i, (username, total_time) in enumerate(top_users, 1):
+        minutes = round(total_time / 60)
+        embed.add_field(
+            name=f"#{i} {username}", 
+            value=f"{minutes} minutes",
+            inline=False
+        )
+    
+    await ctx.send(embed=embed)
 
 @bot.command()
 async def mes_salons(ctx):
     # Récupérer toutes les sessions de l'utilisateur groupées par salon
-    salons_stats = voice_sessions.aggregate([
-        {
-            '$match': {'user_id': ctx.author.id}
-        },
-        {
-            '$group': {
-                '_id': {
-                    'channel_id': '$channel_id',
-                    'channel_name': '$channel_name'
-                },
-                'total_time': {'$sum': '$duration'},
-                'sessions_count': {'$sum': 1}
-            }
-        },
-        {
-            '$sort': {'total_time': -1}
-        }
-    ])
+    cursor = db.execute('SELECT channel_id, channel_name, SUM(duration), COUNT(*) FROM voice_sessions WHERE user_id = ? GROUP BY channel_id, channel_name ORDER BY SUM(duration) DESC', (ctx.author.id,))
+    salons_stats = cursor.fetchall()
     
     embed = discord.Embed(
         title=f"Temps passé par salon pour {ctx.author.name}",
@@ -350,10 +234,10 @@ async def mes_salons(ctx):
     )
     
     for salon in salons_stats:
-        heures = round(salon['total_time'] / 3600, 1)
-        sessions = salon['sessions_count']
+        heures = round(salon[2] / 3600, 1)
+        sessions = salon[3]
         embed.add_field(
-            name=salon['_id']['channel_name'],
+            name=salon[1],
             value=f"⏰ {heures}h\n🔄 {sessions} sessions",
             inline=False
         )
@@ -363,10 +247,11 @@ async def mes_salons(ctx):
 @bot.command()
 async def user_temps(ctx, user: discord.Member):
     # Récupérer les stats de l'utilisateur mentionné
-    user_data = voice_times.find_one({"user_id": user.id})
+    cursor = db.execute('SELECT total_time FROM voice_times WHERE user_id = ?', (user.id,))
+    user_data = next(cursor, {'total_time': 0})
     
-    if user_data:
-        total_minutes = round(user_data["total_time"] / 60)
+    if user_data['total_time'] > 0:
+        total_minutes = round(user_data['total_time'] / 60)
         total_heures = round(total_minutes / 60, 1)
         
         embed = discord.Embed(
@@ -381,11 +266,8 @@ async def user_temps(ctx, user: discord.Member):
         
         # Ajouter le temps aujourd'hui
         today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-        today_sessions = voice_sessions.find({
-            'user_id': user.id,
-            'start_time': {'$gte': today}
-        })
-        today_time = sum(session['duration'] for session in today_sessions)
+        cursor = db.execute('SELECT SUM(duration) FROM voice_sessions WHERE user_id = ? AND start_time >= ?', (user.id, today))
+        today_time = next(cursor, {'SUM(duration)': 0})['SUM(duration)']
         today_minutes = round(today_time / 60)
         
         embed.add_field(
