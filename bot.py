@@ -1,19 +1,37 @@
+import os
 import discord
 from discord.ext import commands
 import pymongo
 from datetime import datetime, timedelta
 from collections import defaultdict
-from dotenv import load_dotenv
-import os
-
-load_dotenv()
 
 # Configuration MongoDB
 MONGODB_URI = os.getenv('MONGODB_URI')
-client = pymongo.MongoClient(MONGODB_URI)
-db = client["voice_tracker"]
-voice_times = db["voice_times"]
-voice_sessions = db["voice_sessions"]  # Nouvelle collection pour les sessions
+try:
+    client = pymongo.MongoClient(
+        MONGODB_URI,
+        serverSelectionTimeoutMS=30000,
+        tls=True,
+        tlsAllowInvalidCertificates=True,
+        retryWrites=True,
+        w='majority',
+        connectTimeoutMS=30000,
+        socketTimeoutMS=None,
+        maxPoolSize=50
+    )
+    # Test de connexion
+    client.admin.command('ping')
+    print("Connexion à MongoDB réussie!")
+    
+    # Initialisation des collections
+    db = client["HugoBot"]  # Assurez-vous que c'est le bon nom de base de données
+    voice_times = db["voice_times"]
+    voice_sessions = db["voice_sessions"]
+except Exception as e:
+    print(f"Erreur de connexion MongoDB: {e}")
+    client = None
+    voice_times = None
+    voice_sessions = None
 
 bot = commands.Bot(command_prefix='!', intents=discord.Intents.all())
 
