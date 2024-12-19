@@ -5,9 +5,10 @@ import pymongo
 from datetime import datetime, timedelta
 from collections import defaultdict
 
-# Configuration MongoDB
+# Configuration MongoDB avec plus de logging
 MONGODB_URI = os.getenv('MONGODB_URI')
 try:
+    print("Tentative de connexion à MongoDB...")
     client = pymongo.MongoClient(
         MONGODB_URI,
         serverSelectionTimeoutMS=30000,
@@ -24,11 +25,13 @@ try:
     print("Connexion à MongoDB réussie!")
     
     # Initialisation des collections
-    db = client["HugoBot"]  # Assurez-vous que c'est le bon nom de base de données
+    db = client["HugoBot"]
     voice_times = db["voice_times"]
     voice_sessions = db["voice_sessions"]
+    print("Collections MongoDB initialisées avec succès")
 except Exception as e:
-    print(f"Erreur de connexion MongoDB: {e}")
+    print(f"Erreur détaillée de connexion MongoDB: {str(e)}")
+    print(f"Type d'erreur: {type(e)}")
     client = None
     voice_times = None
     voice_sessions = None
@@ -37,6 +40,11 @@ bot = commands.Bot(command_prefix='!', intents=discord.Intents.all())
 
 # Dictionnaire pour stocker les sessions actives
 voice_states = {}
+
+# Ajoutez cette fonction de vérification
+def check_db():
+    if voice_times is None or voice_sessions is None:
+        raise Exception("La base de données n'est pas disponible")
 
 @bot.event
 async def on_voice_state_update(member, before, after):
@@ -252,29 +260,35 @@ async def best_streak(ctx):
 
 @bot.command()
 async def temps(ctx):
-    # Affiche le temps total d'un utilisateur
-    user_data = voice_times.find_one({"user_id": ctx.author.id})
-    if user_data:
-        total_minutes = round(user_data["total_time"] / 60)
-        await ctx.send(f"Vous avez passé {total_minutes} minutes en vocal!")
-    else:
-        await ctx.send("Vous n'avez pas encore passé de temps en vocal!")
+    try:
+        check_db()  # Vérifie l'état de la base de données
+        user_data = voice_times.find_one({"user_id": ctx.author.id})
+        if user_data:
+            total_minutes = round(user_data["total_time"] / 60)
+            await ctx.send(f"Vous avez passé {total_minutes} minutes en vocal!")
+        else:
+            await ctx.send("Vous n'avez pas encore passé de temps en vocal!")
+    except Exception as e:
+        await ctx.send(f"Erreur: {str(e)}")
 
 @bot.command()
 async def top(ctx, limit: int = 5):
-    # Affiche le top X des utilisateurs
-    top_users = voice_times.find().sort("total_time", -1).limit(limit)
-    
-    embed = discord.Embed(title=f"Top {limit} - Temps en vocal", color=discord.Color.blue())
-    for i, user in enumerate(top_users, 1):
-        minutes = round(user["total_time"] / 60)
-        embed.add_field(
-            name=f"#{i} {user['username']}", 
-            value=f"{minutes} minutes",
-            inline=False
-        )
-    
-    await ctx.send(embed=embed)
+    try:
+        check_db()
+        top_users = voice_times.find().sort("total_time", -1).limit(limit)
+        
+        embed = discord.Embed(title=f"Top {limit} - Temps en vocal", color=discord.Color.blue())
+        for i, user in enumerate(top_users, 1):
+            minutes = round(user["total_time"] / 60)
+            embed.add_field(
+                name=f"#{i} {user['username']}", 
+                value=f"{minutes} minutes",
+                inline=False
+            )
+        
+        await ctx.send(embed=embed)
+    except Exception as e:
+        await ctx.send(f"Erreur: {str(e)}")
 
 @bot.command()
 async def mes_salons(ctx):
