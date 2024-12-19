@@ -217,7 +217,7 @@ async def duo(ctx, user: discord.Member):
     hours = round(total_duo_time / 3600, 1)
     await ctx.send(f"Vous avez passé {hours}h en vocal ensemble!")
 
-# Fonction utilitaire pour vérifier les streaks
+# Fonction utilitaire pour vérifier les streak
 def get_streak_days(user_id):
     cursor = db.execute('''
         SELECT DISTINCT date(start_time) as day
