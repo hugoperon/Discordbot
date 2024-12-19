@@ -13,6 +13,29 @@ def init_db():
     
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row  # Pour avoir accès aux colonnes par nom
+    
+    # Création des tables
+    cursor = conn.cursor()
+    
+    # Table pour les temps totaux
+    cursor.execute('''CREATE TABLE IF NOT EXISTS voice_times
+                     (user_id INTEGER PRIMARY KEY,
+                      username TEXT,
+                      total_time REAL DEFAULT 0)''')
+    
+    # Table pour les sessions individuelles
+    cursor.execute('''CREATE TABLE IF NOT EXISTS voice_sessions
+                     (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                      user_id INTEGER,
+                      username TEXT,
+                      channel_id INTEGER,
+                      channel_name TEXT,
+                      start_time TIMESTAMP,
+                      end_time TIMESTAMP,
+                      duration REAL)''')
+    
+    conn.commit()
+    print("Tables de la base de données créées avec succès")
     return conn
 
 # Initialisation de la base de données
